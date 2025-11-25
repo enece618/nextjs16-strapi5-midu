@@ -3,24 +3,34 @@ import { type NextRequest, NextResponse } from "next/server";
 import { STRAPI_BASE_URL } from "./lib/strapi";
 
 const protectedRoutes = ["/dashboard"];
+const publicAuthRoutes = ["/signin", "/signup"];
 
 function checkIsProtectedRoute(path: string) {
     return protectedRoutes.some(route => path.startsWith(route));
+}
+
+function checkIsPublicAuthRoute(path: string) {
+    return publicAuthRoutes.some(route => path.startsWith(route));
 }
 
 export async function proxy(req: NextRequest) {
     const currentPath = req.nextUrl.pathname;
 
     const isProtectedRoute = checkIsProtectedRoute(currentPath);
+    const isPublicAuthRoute = checkIsPublicAuthRoute(currentPath);
 
-    if (!isProtectedRoute) return NextResponse.next();
+    if (!isProtectedRoute && !isPublicAuthRoute) return NextResponse.next();
 
     try {
         const cookieStore = await cookies();
         const jwt = cookieStore.get('jwt')?.value;
 
-        if (!jwt) {
+        if (isProtectedRoute && !jwt) {
             return NextResponse.redirect(new URL('/signin', req.url));
+        }
+
+        if (isPublicAuthRoute && !jwt) {
+            return NextResponse.next();
         }
 
         const response = await fetch(`${STRAPI_BASE_URL}/api/users/me`, {
@@ -34,14 +44,21 @@ export async function proxy(req: NextRequest) {
         console.log(userResponse);
 
 
-        if (!userResponse) {
+        if (isProtectedRoute && !userResponse) {
             return NextResponse.redirect(new URL('/signin', req.url));
+        }
+
+        if (isPublicAuthRoute && userResponse) {
+            return NextResponse.redirect(new URL('/dashboard', req.url));
         }
 
         return NextResponse.next();
     } catch (error) {
         console.error('Error checking authentication', error);
-        return NextResponse.redirect(new URL('/signin', req.url));
+        if (isProtectedRoute) {
+            return NextResponse.redirect(new URL('/signin', req.url));
+        }
+        return NextResponse.next();
     }
 
 }
